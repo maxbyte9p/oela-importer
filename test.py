@@ -1,24 +1,38 @@
 import os
 from github import Github, Auth
+from github.Organization import Organization
+from github.PaginatedList import PaginatedList
 import koji
 import collect_data
 
-github_token = open(os.environ['HOME'] + "/.github_tokens/openela-import").read().rstrip('\n')
-github_auth = Auth.Token(github_token)
-github_session = Github(auth=github_auth)
+def Github_Authenticate() -> Auth.Token:
+    github_token = open(os.environ['HOME'] + "/.github_tokens/openela-import").read().rstrip('\n')
+    return Auth.Token(github_token)
 
-openela_main = github_session.get_organization('openela-main')
-openela_main_repos = openela_main.get_repos('public')
-openela_main_repos_data = collect_data.applied_func_iter(
-        openela_main_repos,
-        collect_data.collect_repo_data
-)
 
-koji_config = koji.read_config('kojidev')
-koji_session_opts = koji.grab_session_options(koji_config)
-koji_session = koji.ClientSession(koji_config['server'], koji_session_opts)
-koji_session.gssapi_login()
-koji_session.exclusiveSession()
+def Create_Github_Session(auth: Auth.Token) -> Github:
+    return Github(auth=auth)
+
+def Get_Organization(session: Github, org: str = 'openela-main') -> Organization:
+    return session.get_organization(org)
+
+def Get_Raw_Repos(org: Organization, visibility: str = 'public') -> PaginatedList:
+    return org.get_repos(visibility)
+
+def Generate_Repo_Collection_Map(pl: PaginatedList) -> map:
+    return map(
+            collect_data.collect,
+            pl
+    )
+
+def Create_Koji_Session(config_name: str = 'kojidev') -> koji.ClientSession:
+    koji_config = koji.read_config(config_name)
+    koji_session_opts = koji.grab_session_options(koji_config)
+    koji_session = koji.ClientSession(koji_config['server'], koji_session_opts)
+    koji_session.gssapi_login()
+    koji_session.exclusiveSession()
+
+    return koji_session
 
 def koji_import(
         koji_session: koji.ClientSession,
@@ -34,10 +48,20 @@ def koji_import(
             target=koji_target
     )
 
-oela_import = lambda r: koji_import(koji_session, r, 'el-9.3', 'dist-openela9')
+def Run() -> None:
+    gsession = Create_Github_Session(
+            Github_Authenticate()
+    )
+    repo_data_map = Generate_Repo_Collection_Map(
+            Get_Raw_Repos(
+                Get_Organization(gsession)
+            )
+    )
 
-oela_import_feedback = lambda r: print(f"Package: {r.name}, Task ID: {oela_import(r)}")
+    ksession = Create_Koji_Session()
 
-run = lambda: [i for i in map(oela_import_feedback, openela_main_repos_data)]
-run()
+    oela_import = lambda r: koji_import(ksession, r, 'el-9.3', 'dist-openela9')
+    oela_import_feedback = lambda r: print(f"Package: {r.name}, Task ID: {oela_import(r)}")
+    for i in repo_data_map:
+        oela_import_feedback(i)
 
