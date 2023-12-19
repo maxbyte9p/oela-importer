@@ -1,14 +1,15 @@
 import os
+from itertools import starmap
 from github import Github, Auth
 from github.Organization import Organization
 from github.PaginatedList import PaginatedList
 import koji
+import importer
 import collect_data
 
 def Github_Authenticate() -> Auth.Token:
     github_token = open(os.environ['HOME'] + "/.github_tokens/openela-import").read().rstrip('\n')
     return Auth.Token(github_token)
-
 
 def Create_Github_Session(auth: Auth.Token) -> Github:
     return Github(auth=auth)
@@ -34,19 +35,15 @@ def Create_Koji_Session(config_name: str = 'kojidev') -> koji.ClientSession:
 
     return koji_session
 
-def koji_import(
-        koji_session: koji.ClientSession,
-        repo_data: collect_data.Repo_Data,
-        desired_branch: str,
-        koji_target: str
-) -> int | None:
-    if not desired_branch in [b.name for b in repo_data.branches]:
-        return None
-
-    return koji_session.build(
-            src='git+'+repo_data.clone_url+'#'+desired_branch,
-            target=koji_target
+def Generate_Import_Target_Map(rdm: map, db: str, t: str) -> starmap:
+    return filter(
+            None,
+            starmap(
+                importer.Create_Import_Target,
+                (tuple([rd, db, t]) for rd in rdm)
+            )
     )
+
 
 def Run() -> None:
     gsession = Create_Github_Session(
@@ -58,10 +55,16 @@ def Run() -> None:
             )
     )
 
+    import_target_map = Generate_Import_Target_Map(
+            repo_data_map,
+            'el-9.3',
+            'dist-openela9'
+    )
+
     ksession = Create_Koji_Session()
+    for i in import_target_map:
+        importer.Koji_Import(ksession, i)
+        print(f"Imported: {i}")
 
-    oela_import = lambda r: koji_import(ksession, r, 'el-9.3', 'dist-openela9')
-    oela_import_feedback = lambda r: print(f"Package: {r.name}, Task ID: {oela_import(r)}")
-    for i in repo_data_map:
-        oela_import_feedback(i)
 
+Run()
