@@ -3,6 +3,7 @@ from koji import ClientSession
 from collect_data import Repo_Data
 
 class Import_Target(NamedTuple):
+    name: str
     src: str
     target: str
 
@@ -15,11 +16,13 @@ def Create_Import_Target(
         return None
 
     return Import_Target(
+            name=rd.name,
             src='git+'+rd.clone_url+'#'+db,
             target=t
     )
 
-def Koji_Import(session: ClientSession, it: Import_Target) -> int:
-    return session.build(*it)
+def Koji_Import(session: ClientSession, it: Import_Target, owner: str) -> int:
+    session.packageListAdd(it.target, it.name, owner)
+    return session.build(it.src, it.target)
 
 
