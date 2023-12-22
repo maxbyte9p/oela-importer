@@ -1,5 +1,6 @@
 import os
 from itertools import starmap
+import concurrent.futures
 from github import Github, Auth
 from github.Organization import Organization
 from github.PaginatedList import PaginatedList
@@ -63,8 +64,42 @@ def Run() -> None:
 
     ksession = Create_Koji_Session()
     for i in import_target_map:
-        importer.Koji_Import(ksession, i)
+        importer.Koji_Import(ksession, i, 'owner')
         print(f"Imported: {i}")
 
 
-Run()
+def Run_Concurrent() -> None:
+    gsession = Create_Github_Session(
+            Github_Authenticate()
+    )
+    repo_data_map = Generate_Repo_Collection_Map(
+            Get_Raw_Repos(
+                Get_Organization(gsession)
+            )[:30]
+    )
+
+    import_target_map = Generate_Import_Target_Map(
+            repo_data_map,
+            'el-9.3',
+            'dist-openela9'
+    )
+
+    ksession = Create_Koji_Session()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        future_to_koji_import = {executor.submit(importer.Koji_Import, ksession, i, 'owner'): i for i in import_target_map}
+        for future in concurrent.futures.as_completed(future_to_koji_import):
+            it = future_to_koji_import[future]
+            print(f"Imported: {it}")
+
+def Helper() -> None:
+    gsession = Create_Github_Session(
+            Github_Authenticate()
+    )
+    
+    raw_repos = Get_Raw_Repos(
+            Get_Organization(gsession)
+    )
+
+    return raw_repos
+
